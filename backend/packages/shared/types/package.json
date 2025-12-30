@@ -1,0 +1,14 @@
+{
+  "name": "@app/types",
+  "version": "0.1.0",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "rimraf dist && tsc -b",
+    "dev": "ts-node-dev src/index.ts"
+  },
+  "dependencies": {
+    "zod": "^3.23.8"
+  }
+}
+

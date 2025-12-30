@@ -1,0 +1,18 @@
+{
+  "extends": "../../tsconfig.json",
+  "compilerOptions": {
+    "composite": true,
+    "rootDir": "src",
+    "outDir": "dist"
+  },
+  "include": ["src/**/*"],
+  "references": [
+    { "path": "../.." },
+    { "path": "../../packages/shared/config" },
+    { "path": "../../packages/shared/logger" },
+    { "path": "../../packages/shared/types" },
+    { "path": "../../packages/shared/auth-middleware" },
+    { "path": "../../packages/shared/redis" }
+  ]
+}
+

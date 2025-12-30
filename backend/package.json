@@ -1,0 +1,40 @@
+{
+  "name": "backend",
+  "private": true,
+  "version": "0.1.0",
+  "workspaces": [
+    "services/*",
+    "packages/shared/*"
+  ],
+  "scripts": {
+    "build": "tsc -b",
+    "dev:auth": "npm --workspace services/auth run dev",
+    "dev:project": "npm --workspace services/project run dev",
+    "dev:collab": "npm --workspace services/collab run dev",
+    "dev:file": "npm --workspace services/file run dev",
+    "dev:ai": "npm --workspace services/ai run dev",
+    "lint": "eslint \"services/**/*.{ts,tsx}\" \"packages/**/*.{ts,tsx}\"",
+    "test": "vitest run"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.9.0",
+    "@types/express": "^4.17.21",
+    "@types/cors": "^2.8.17",
+    "@types/jsonwebtoken": "^9.0.5",
+    "@types/supertest": "^2.0.16",
+    "supertest": "^7.1.1",
+    "vitest": "^1.6.0",
+    "eslint": "^8.57.0",
+    "@typescript-eslint/parser": "^6.21.0",
+    "@typescript-eslint/eslint-plugin": "^6.21.0",
+    "eslint-config-prettier": "^9.1.0",
+    "prettier": "^3.2.5",
+    "typescript": "^5.4.0",
+    "ts-node-dev": "^2.0.0",
+    "rimraf": "^5.0.5"
+  }
+}
+

@@ -1,0 +1,29 @@
+{
+  "compilerOptions": {
+    "composite": true,
+    "target": "ES2020",
+    "module": "CommonJS",
+    "moduleResolution": "Node",
+    "baseUrl": ".",
+    "paths": {
+      "@app/config": ["packages/shared/config/src"],
+      "@app/logger": ["packages/shared/logger/src"],
+      "@app/types": ["packages/shared/types/src"],
+      "@app/auth-middleware": ["packages/shared/auth-middleware/src"],
+      "@app/redis": ["packages/shared/redis/src"]
+    },
+    "esModuleInterop": true,
+    "forceConsistentCasingInFileNames": true,
+    "strict": true,
+    "skipLibCheck": true,
+    "outDir": "dist",
+    "rootDir": ".",
+    "resolveJsonModule": true,
+    "types": ["node"]
+  },
+  "include": [
+    "services/**/*",
+    "packages/**/*"
+  ]
+}
+
