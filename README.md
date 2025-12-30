@@ -1,4 +1,4 @@
-# Collaboration Platform
+# Collaboration Platform Service
 
 A full-stack collaboration platform with real-time editing, file management, and AI integration.
 
@@ -182,4 +182,7 @@ npm run build
 ## License
 
 MIT
+
+
+
 
