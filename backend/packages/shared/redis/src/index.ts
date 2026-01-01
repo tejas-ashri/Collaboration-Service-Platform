@@ -14,6 +14,19 @@ export function createRedisClients(url?: string, options: RedisOptions = {}): Re
 
 export async function connectRedis(clients: RedisClients | null) {
   if (!clients) return;
-  await Promise.all([clients.pub.connect(), clients.sub.connect()]);
+  try {
+    // ioredis connects automatically, but we can check the connection status
+    // Only call connect() if not already connected
+    if (clients.pub.status !== 'ready' && clients.pub.status !== 'connecting') {
+      await clients.pub.connect();
+    }
+    if (clients.sub.status !== 'ready' && clients.sub.status !== 'connecting') {
+      await clients.sub.connect();
+    }
+  } catch (err) {
+    // If connection fails, we'll continue without Redis
+    // The clients will retry automatically in the background
+    throw err;
+  }
 }
 

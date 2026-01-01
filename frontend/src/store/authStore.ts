@@ -22,12 +22,28 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     try {
       const response = await authApi.post('/auth/login', { email });
       const { accessToken, refreshToken } = response.data;
+      if (!accessToken || !refreshToken) {
+        throw new Error('Invalid response from server: missing tokens');
+      }
       localStorage.setItem('accessToken', accessToken);
       localStorage.setItem('refreshToken', refreshToken);
       set({ accessToken, refreshToken });
       await get().fetchUser();
     } catch (error: any) {
-      throw new Error(error.response?.data?.error || 'Login failed');
+      // Better error handling with more details
+      if (error.response) {
+        // Server responded with error status
+        const errorMessage = error.response.data?.error || error.response.data?.message || 'Login failed';
+        const errorDetails = error.response.data?.details;
+        const fullError = errorDetails ? `${errorMessage}: ${JSON.stringify(errorDetails)}` : errorMessage;
+        throw new Error(fullError);
+      } else if (error.request) {
+        // Request was made but no response received
+        throw new Error('Unable to connect to server. Please check if the backend is running.');
+      } else {
+        // Error setting up the request
+        throw new Error(error.message || 'Login failed');
+      }
     } finally {
       set({ isLoading: false });
     }

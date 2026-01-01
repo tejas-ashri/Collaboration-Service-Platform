@@ -35,21 +35,37 @@ async function bootstrap() {
   const client = cfg.mongoUri ? new MongoClient(cfg.mongoUri) : null;
   const redis = createRedisClients(cfg.redisUrl);
   if (redis) {
-    await connectRedis(redis);
-    logger.info("Connected to Redis");
+    // ioredis connects automatically, no need to call connect()
+    // Set up error handlers
+    redis.pub.on('error', (err) => {
+      logger.warn({ err }, "Redis pub client error");
+    });
+    redis.sub.on('error', (err) => {
+      logger.warn({ err }, "Redis sub client error");
+    });
+    redis.pub.on('connect', () => {
+      logger.info("Redis pub client connected");
+    });
+    logger.info("Redis clients created (will connect automatically)");
   }
 
   if (client) {
-    await client.connect();
-    logger.info("Connected to MongoDB");
+    try {
+      await client.connect();
+      logger.info("Connected to MongoDB");
+    } catch (err) {
+      logger.warn({ err }, "Failed to connect to MongoDB, continuing without it");
+    }
   }
 
   app.get("/health", (_: Request, res: Response) => res.json({ status: "ok" }));
 
   app.post("/auth/login", async (req: Request, res: Response) => {
     try {
+      logger.info({ body: req.body }, "Login request received");
       const parseResult = loginRequestSchema.safeParse(req.body);
       if (!parseResult.success) {
+        logger.warn({ issues: parseResult.error.issues }, "Invalid login payload");
         return res.status(400).json({ error: "invalid payload", details: parseResult.error.issues });
       }
       const { email } = parseResult.data;
@@ -62,15 +78,29 @@ async function bootstrap() {
         return res.status(500).json({ error: "JWT private key missing" });
       }
 
-      const accessToken = jwt.sign(claims, secret, { algorithm, expiresIn: "15m" });
-      const refreshToken = jwt.sign({ sub: email, jti }, secret, { algorithm, expiresIn: "7d" });
-      if (redis) {
-        await redis.pub.setex(`session:${jti}`, 60 * 60 * 24 * 7, JSON.stringify({ sub: email }));
+      try {
+        const accessToken = jwt.sign(claims, secret, { algorithm, expiresIn: "15m" });
+        const refreshToken = jwt.sign({ sub: email, jti }, secret, { algorithm, expiresIn: "7d" });
+        
+        if (redis) {
+          try {
+            await redis.pub.setex(`session:${jti}`, 60 * 60 * 24 * 7, JSON.stringify({ sub: email }));
+          } catch (redisErr) {
+            logger.warn({ err: redisErr }, "Failed to store session in Redis, continuing without it");
+            // Continue without Redis - session storage is optional
+          }
+        }
+        
+        logger.info({ email }, "Login successful");
+        return res.json({ accessToken, refreshToken });
+      } catch (jwtErr) {
+        logger.error({ err: jwtErr }, "JWT signing failed");
+        return res.status(500).json({ error: "Failed to generate tokens", message: jwtErr instanceof Error ? jwtErr.message : "Unknown error" });
       }
-      return res.json({ accessToken, refreshToken });
     } catch (err) {
       logger.error({ err }, "login failed");
-      return res.status(500).json({ error: "internal server error" });
+      const errorMessage = err instanceof Error ? err.message : "Unknown error";
+      return res.status(500).json({ error: "internal server error", message: errorMessage });
     }
   });
 

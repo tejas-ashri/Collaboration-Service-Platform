@@ -17,7 +17,7 @@ export type LoginRequest = z.infer<typeof loginRequestSchema>;
 
 export const projectCreateSchema = z.object({
   name: z.string().min(1),
-  ownerId: z.string().min(1)
+  ownerId: z.string().min(1).optional() // Optional - will be set from JWT token if not provided
 });
 
 export type ProjectCreate = z.infer<typeof projectCreateSchema>;

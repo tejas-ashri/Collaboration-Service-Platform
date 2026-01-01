@@ -18,16 +18,30 @@ async function bootstrap() {
   if (!cfg.mongoUri) {
     logger.warn("MONGO_URI is not set; project persistence will be disabled.");
   }
-  const client = cfg.mongoUri ? new MongoClient(cfg.mongoUri) : null;
-  const db = client ? client.db("app") : null;
-  const projects = db?.collection<ProjectCreate & { collaborators: { userId: string; role: string }[]; createdAt: Date; updatedAt: Date }>("projects");
+  let client: MongoClient | null = null;
+  let db: ReturnType<MongoClient["db"]> | null = null;
+  let projects: any = null;
 
-  if (client) {
-    await client.connect();
-    await projects?.createIndex({ ownerId: 1, updatedAt: -1 });
-    await projects?.createIndex({ name: 1, ownerId: 1 });
-    await projects?.createIndex({ "collaborators.userId": 1 });
-    logger.info("Connected to MongoDB");
+  if (cfg.mongoUri) {
+    try {
+      client = new MongoClient(cfg.mongoUri);
+      await client.connect();
+      db = client.db("app");
+      if (db) {
+        projects = db.collection<ProjectCreate & { collaborators: { userId: string; role: string }[]; createdAt: Date; updatedAt: Date }>("projects");
+        if (projects) {
+          await projects.createIndex({ ownerId: 1, updatedAt: -1 });
+          await projects.createIndex({ name: 1, ownerId: 1 });
+          await projects.createIndex({ "collaborators.userId": 1 });
+        }
+      }
+      logger.info("Connected to MongoDB");
+    } catch (err) {
+      logger.warn({ err }, "Failed to connect to MongoDB, continuing without it");
+      client = null;
+      db = null;
+      projects = null;
+    }
   }
 
   app.get("/health", (_: Request, res: Response) => res.json({ status: "ok" }));
@@ -54,14 +68,34 @@ async function bootstrap() {
   });
 
   app.post("/projects", async (req: Request, res: Response) => {
-    if (!projects) return res.status(503).json({ error: "DB unavailable" });
+    if (!projects || !client) {
+      logger.warn("MongoDB not available for project creation");
+      return res.status(503).json({ error: "DB unavailable", message: "MongoDB connection is not available. Please ensure MongoDB is running." });
+    }
+    
+    // Check if MongoDB connection is still alive
+    try {
+      await client.db("admin").command({ ping: 1 });
+    } catch (err) {
+      logger.error({ err }, "MongoDB connection lost");
+      return res.status(503).json({ error: "DB unavailable", message: "MongoDB connection lost. Please check MongoDB status." });
+    }
+    
     try {
       const parsed = projectCreateSchema.safeParse(req.body);
       if (!parsed.success) {
+        logger.warn({ issues: parsed.error.issues }, "Invalid project creation payload");
         return res.status(400).json({ error: "invalid payload", details: parsed.error.issues });
       }
       const { name } = parsed.data;
-      const ownerId = (req as Request & { user?: { sub?: string } }).user?.sub ?? parsed.data.ownerId;
+      const user = (req as Request & { user?: { sub?: string } }).user;
+      const ownerId = user?.sub ?? parsed.data.ownerId;
+      
+      if (!ownerId) {
+        logger.warn("No ownerId available for project creation");
+        return res.status(401).json({ error: "unauthorized: user not authenticated" });
+      }
+      
       const doc = {
         name,
         ownerId,
@@ -70,10 +104,16 @@ async function bootstrap() {
         updatedAt: new Date()
       };
       const result = await projects.insertOne(doc);
-      return res.status(201).json({ id: result.insertedId, ...doc });
+      logger.info({ projectId: result.insertedId, name, ownerId }, "Project created");
+      return res.status(201).json({ id: result.insertedId, _id: result.insertedId, ...doc });
     } catch (err) {
       logger.error({ err }, "create project failed");
-      return res.status(500).json({ error: "internal server error" });
+      const errorMessage = err instanceof Error ? err.message : "Unknown error";
+      // Check if it's a MongoDB connection error
+      if (errorMessage.includes("Topology is closed") || errorMessage.includes("connection")) {
+        return res.status(503).json({ error: "DB unavailable", message: "MongoDB connection error. Please check MongoDB status." });
+      }
+      return res.status(500).json({ error: "internal server error", message: errorMessage });
     }
   });
 
@@ -84,7 +124,7 @@ async function bootstrap() {
       const project = await projects.findOne({ _id: new ObjectId(id) });
       if (!project) return res.status(404).json({ error: "not found" });
       const userId = (req as Request & { user?: { sub?: string } }).user?.sub;
-      const isCollaborator = project.collaborators.some((c) => c.userId === userId);
+      const isCollaborator = project.collaborators.some((c: { userId: string; role: string }) => c.userId === userId);
       if (!isCollaborator) return res.status(403).json({ error: "forbidden" });
       return res.json(project);
     } catch (err) {
@@ -107,7 +147,7 @@ async function bootstrap() {
       const project = await projects.findOne({ _id: new ObjectId(id) });
       if (!project) return res.status(404).json({ error: "not found" });
 
-      const collaborator = project.collaborators.find((c) => c.userId === userId);
+      const collaborator = project.collaborators.find((c: { userId: string; role: string }) => c.userId === userId);
       if (!collaborator) return res.status(403).json({ error: "forbidden" });
       if (collaborator.role !== "owner" && collaborator.role !== "editor") {
         return res.status(403).json({ error: "forbidden: insufficient permissions" });
@@ -139,7 +179,7 @@ async function bootstrap() {
       const project = await projects.findOne({ _id: new ObjectId(id) });
       if (!project) return res.status(404).json({ error: "not found" });
 
-      const collaborator = project.collaborators.find((c) => c.userId === userId);
+      const collaborator = project.collaborators.find((c: { userId: string; role: string }) => c.userId === userId);
       if (!collaborator || collaborator.role !== "owner") {
         return res.status(403).json({ error: "forbidden: only owner can delete project" });
       }
@@ -164,7 +204,7 @@ async function bootstrap() {
       const project = await projects.findOne({ _id: new ObjectId(id) });
       if (!project) return res.status(404).json({ error: "not found" });
 
-      const isCollaborator = project.collaborators.some((c) => c.userId === userId);
+      const isCollaborator = project.collaborators.some((c: { userId: string; role: string }) => c.userId === userId);
       if (!isCollaborator) return res.status(403).json({ error: "forbidden" });
 
       return res.json({ collaborators: project.collaborators });
@@ -188,13 +228,13 @@ async function bootstrap() {
       const project = await projects.findOne({ _id: new ObjectId(id) });
       if (!project) return res.status(404).json({ error: "not found" });
 
-      const collaborator = project.collaborators.find((c) => c.userId === userId);
+      const collaborator = project.collaborators.find((c: { userId: string; role: string }) => c.userId === userId);
       if (!collaborator || collaborator.role !== "owner") {
         return res.status(403).json({ error: "forbidden: only owner can add collaborators" });
       }
 
       const { userId: newUserId, role } = parsed.data;
-      if (project.collaborators.some((c) => c.userId === newUserId)) {
+      if (project.collaborators.some((c: { userId: string; role: string }) => c.userId === newUserId)) {
         return res.status(409).json({ error: "collaborator already exists" });
       }
 
@@ -203,7 +243,7 @@ async function bootstrap() {
         {
           $push: { collaborators: { userId: newUserId, role } },
           $set: { updatedAt: new Date() }
-        },
+        } as any,
         { returnDocument: "after" }
       );
 
@@ -226,12 +266,12 @@ async function bootstrap() {
       const project = await projects.findOne({ _id: new ObjectId(id) });
       if (!project) return res.status(404).json({ error: "not found" });
 
-      const collaborator = project.collaborators.find((c) => c.userId === userId);
+      const collaborator = project.collaborators.find((c: { userId: string; role: string }) => c.userId === userId);
       if (!collaborator) {
         return res.status(403).json({ error: "forbidden" });
       }
 
-      const targetCollaborator = project.collaborators.find((c) => c.userId === collaboratorId);
+      const targetCollaborator = project.collaborators.find((c: { userId: string; role: string }) => c.userId === collaboratorId);
       if (!targetCollaborator) {
         return res.status(404).json({ error: "collaborator not found" });
       }
@@ -242,7 +282,7 @@ async function bootstrap() {
       }
 
       // Prevent removing the last owner
-      if (targetCollaborator.role === "owner" && project.collaborators.filter((c) => c.role === "owner").length === 1) {
+      if (targetCollaborator.role === "owner" && project.collaborators.filter((c: { userId: string; role: string }) => c.role === "owner").length === 1) {
         return res.status(400).json({ error: "cannot remove last owner" });
       }
 
@@ -251,7 +291,7 @@ async function bootstrap() {
         {
           $pull: { collaborators: { userId: collaboratorId } },
           $set: { updatedAt: new Date() }
-        },
+        } as any,
         { returnDocument: "after" }
       );
 
@@ -263,8 +303,9 @@ async function bootstrap() {
     }
   });
 
-  app.listen(cfg.port + 1, () => {
-    logger.info(`Project service listening on :${cfg.port + 1}`);
+  const port = cfg.port === 4000 ? 4001 : cfg.port; // Project service runs on 4001
+  app.listen(port, () => {
+    logger.info(`Project service listening on :${port}`);
   });
 }
 
